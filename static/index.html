@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MLB Market Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f18;
+      --surface:   #161929;
+      --surface-2: #1e2236;
+      --surface-3: #252840;
+      --border:    #2e3356;
+      --text:      #e2e5f1;
+      --muted:     #7e85a3;
+      --accent:    #6c7ef8;
+      --accent-h:  #8593ff;
+      --green:     #4caf82;
+      --red:       #f05454;
+      --yellow:    #ffc947;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Rarity colours ──────────────────────────────────────── */
+    .r-diamond { color: #4dd0e1; }
+    .r-gold     { color: #ffc947; }
+    .r-silver   { color: #b8c0cc; }
+    .r-bronze   { color: #ff8a4c; }
+    .r-common   { color: #78909c; }
+
+    .rb-diamond { border-left-color: #4dd0e1 !important; }
+    .rb-gold    { border-left-color: #ffc947 !important; }
+    .rb-silver  { border-left-color: #b8c0cc !important; }
+    .rb-bronze  { border-left-color: #ff8a4c !important; }
+    .rb-common  { border-left-color: #78909c !important; }
+
+    /* ── Header ──────────────────────────────────────────────── */
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .header-inner {
+      max-width: 1500px; margin: 0 auto; padding: 0 20px;
+      height: 52px; display: flex; align-items: center; gap: 28px;
+    }
+    .logo { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: -.3px; }
+    .nav  { display: flex; gap: 4px; }
+    .nav-btn {
+      background: none; border: none; color: var(--muted);
+      padding: 7px 16px; border-radius: 6px; cursor: pointer;
+      font-size: 13px; font-weight: 500; transition: all .15s;
+    }
+    .nav-btn:hover  { background: var(--surface-2); color: var(--text); }
+    .nav-btn.active { background: var(--surface-3); color: var(--accent); }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .main { max-width: 1500px; margin: 0 auto; padding: 16px 20px; }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Search page ─────────────────────────────────────────── */
+    .search-wrap { margin-bottom: 14px; }
+    .search-wrap input {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 11px 16px; border-radius: 8px; font-size: 15px;
+      outline: none; transition: border-color .15s;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+
+    .search-layout {
+      display: grid; grid-template-columns: 300px 1fr; gap: 14px;
+      height: calc(100vh - 130px);
+    }
+
+    .results-col {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; overflow-y: auto;
+    }
+    .results-inner { padding: 6px; }
+
+    .result-item {
+      padding: 9px 11px; border-radius: 6px; cursor: pointer;
+      transition: background .1s; border-left: 3px solid transparent;
+      margin-bottom: 2px;
+    }
+    .result-item:hover  { background: var(--surface-2); }
+    .result-item.active { background: var(--surface-3); }
+
+    .result-top  { display: flex; justify-content: space-between; margin-bottom: 3px; }
+    .result-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+    .result-ovr  { font-weight: 700; color: var(--accent); font-size: 13px; }
+    .result-meta { display: flex; gap: 7px; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+    .result-prices { display: flex; gap: 6px; font-size: 11px; align-items: center; }
+
+    /* ── Card detail panel ───────────────────────────────────── */
+    .detail-col {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; overflow-y: auto;
+    }
+    .detail-inner { padding: 20px; }
+
+    .card-header { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 20px; }
+    .card-img {
+      width: 96px; height: 134px; object-fit: contain; flex-shrink: 0;
+      border-radius: 6px; background: var(--surface-2);
+    }
+    .card-info { flex: 1; min-width: 0; }
+    .card-name { font-size: 21px; font-weight: 700; margin-bottom: 8px; line-height: 1.2; }
+
+    .badges { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+    .badge {
+      padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+      background: var(--surface-3);
+    }
+    .badge-diamond { background: rgba(77,208,225,.15); color: #4dd0e1; }
+    .badge-gold    { background: rgba(255,201,71,.15);  color: #ffc947; }
+    .badge-silver  { background: rgba(184,192,204,.15); color: #b8c0cc; }
+    .badge-bronze  { background: rgba(255,138,76,.15);  color: #ff8a4c; }
+    .badge-common  { background: rgba(120,144,156,.15); color: #78909c; }
+
+    .meta-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 12px; font-size: 13px;
+    }
+    .meta-row { display: flex; gap: 6px; }
+    .meta-label { color: var(--muted); flex-shrink: 0; }
+
+    /* ── Price boxes ─────────────────────────────────────────── */
+    .price-boxes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 22px; }
+    .price-box {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 12px; text-align: center;
+    }
+    .pb-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 6px; }
+    .pb-value { font-size: 20px; font-weight: 700; margin-bottom: 2px; }
+    .pb-sub   { font-size: 11px; color: var(--muted); }
+    .c-sell   { color: var(--red); }
+    .c-buy    { color: var(--green); }
+    .c-spread { color: var(--accent); }
+    .c-qs     { color: var(--yellow); }
+    .c-flip-pos { color: var(--green); }
+    .c-flip-neg { color: var(--red); }
+
+    /* ── Chart ───────────────────────────────────────────────── */
+    .chart-section { }
+    .section-title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .6px; color: var(--muted); margin-bottom: 10px;
+    }
+    .chart-wrap {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; height: 260px; position: relative;
+    }
+
+    /* ── Market page ─────────────────────────────────────────── */
+    .filters-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+    }
+    .filter-rows { display: flex; flex-direction: column; gap: 10px; }
+    .filter-row  { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+
+    .fg { display: flex; flex-direction: column; gap: 4px; }
+    .fg label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .fg input, .fg select {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text); padding: 7px 10px; border-radius: 6px;
+      font-size: 13px; outline: none; height: 32px;
+    }
+    .fg input:focus, .fg select:focus { border-color: var(--accent); }
+    .fg select option { background: var(--surface-2); }
+    .fg-wide input, .fg-wide select { min-width: 140px; }
+    .fg-sm  input, .fg-sm  select  { width: 90px; }
+    .fg-xs  input, .fg-xs  select  { width: 72px; }
+
+    .filter-divider { color: var(--border); align-self: center; padding-bottom: 0; margin-top: 16px; }
+
+    .btn {
+      padding: 0 18px; height: 32px; border-radius: 6px; border: none;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-ghost  {
+      background: var(--surface-2); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ── Market table ────────────────────────────────────────── */
+    .table-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px 8px 0 0; border-bottom: none;
+    }
+    .result-count { font-size: 12px; color: var(--muted); }
+
+    .market-table-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 0 0 8px 8px; overflow: auto;
+    }
+
+    #market-table { width: 100%; border-collapse: collapse; }
+
+    #market-table th {
+      background: var(--surface-2); padding: 9px 12px;
+      text-align: left; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+      border-bottom: 1px solid var(--border); white-space: nowrap;
+      cursor: pointer; user-select: none; position: sticky; top: 0;
+    }
+    #market-table th:hover { color: var(--text); }
+    #market-table th.sort-active { color: var(--accent); }
+    #market-table th.sort-active::after { content: ' ↓'; }
+    #market-table th.sort-active[data-order="asc"]::after { content: ' ↑'; }
+    #market-table th.no-sort { cursor: default; }
+
+    #market-table td {
+      padding: 8px 12px; border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .mrow { cursor: pointer; transition: background .1s; }
+    .mrow:hover { background: var(--surface-2); }
+    .mrow:last-child td { border-bottom: none; }
+
+    .name-cell  { display: flex; align-items: center; gap: 8px; }
+    .mini-img   { width: 28px; height: 39px; object-fit: contain; flex-shrink: 0; }
+    .name-text  { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+    .ovr-cell   { font-weight: 700; color: var(--accent); }
+    .tc-sell    { color: var(--red);   font-weight: 600; }
+    .tc-buy     { color: var(--green); font-weight: 600; }
+    .tc-spread  { font-weight: 600; }
+    .tc-hi  { color: var(--red);    font-weight: 700; }
+    .tc-med { color: var(--yellow); font-weight: 600; }
+    .tc-lo  { color: var(--muted); }
+
+    /* ── Shared ──────────────────────────────────────────────── */
+    .placeholder {
+      display: flex; align-items: center; justify-content: center;
+      height: 200px; color: var(--muted); font-size: 14px; text-align: center;
+    }
+    .no-data { padding: 20px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    /* ── Dashboard page ──────────────────────────────────────── */
+    .logo { cursor: pointer; user-select: none; }
+
+    #page-dashboard { padding-bottom: 36px; }
+
+    .dash-section { margin-bottom: 30px; }
+
+    .dash-heading {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 13px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .dash-heading::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    .dash-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+      gap: 12px;
+    }
+
+    .dash-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-top: 3px solid var(--border); border-radius: 10px;
+      padding: 14px 12px 12px; cursor: pointer;
+      transition: transform .15s, background .15s;
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+    }
+    .dash-card:hover { background: var(--surface-2); transform: translateY(-3px); }
+
+    .dash-card.dbc-diamond { border-top-color: #4dd0e1; }
+    .dash-card.dbc-gold    { border-top-color: #ffc947; }
+    .dash-card.dbc-silver  { border-top-color: #b8c0cc; }
+    .dash-card.dbc-bronze  { border-top-color: #ff8a4c; }
+    .dash-card.dbc-common  { border-top-color: #78909c; }
+
+    .dash-card-img {
+      width: 90px; height: 125px; object-fit: contain;
+      margin-bottom: 10px; border-radius: 4px;
+    }
+    .dash-card-name {
+      font-weight: 700; font-size: 13px; line-height: 1.3; margin-bottom: 3px;
+      width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .dash-card-meta { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+    .dash-card-prices {
+      font-size: 11px; margin-bottom: 10px;
+      display: flex; gap: 4px; justify-content: center; align-items: center;
+    }
+    .dash-metric {
+      margin-top: auto; width: 100%; padding: 7px 8px; border-radius: 6px;
+      background: var(--surface-2); font-weight: 700; font-size: 15px;
+    }
+    .dash-metric-sub { font-size: 10px; font-weight: 400; opacity: .8; margin-top: 2px; }
+    .m-pos { color: var(--green); }
+    .m-neg { color: var(--red); }
+
+    /* ── Trends page ─────────────────────────────────────────── */
+    .trends-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+    .ttab {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); padding: 7px 18px; border-radius: 6px;
+      cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
+    }
+    .ttab:hover  { color: var(--text); border-color: var(--muted); }
+    .ttab.active { background: var(--surface-3); color: var(--accent); border-color: var(--accent); }
+
+    .trends-layout {
+      display: grid; grid-template-columns: 240px 1fr; gap: 14px;
+      height: calc(100vh - 165px);
+    }
+
+    .seg-item {
+      padding: 9px 11px; border-radius: 6px; cursor: pointer;
+      border-left: 3px solid transparent; margin-bottom: 2px;
+      transition: background .1s;
+    }
+    .seg-item:hover  { background: var(--surface-2); }
+    .seg-item.active { background: var(--surface-3); border-left-color: var(--accent); }
+    .seg-top  { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+    .seg-name { font-weight: 600; font-size: 13px; }
+    .seg-sub  { font-size: 11px; color: var(--muted); }
+    .seg-delta-pos { color: var(--green); font-size: 11px; font-weight: 600; }
+    .seg-delta-neg { color: var(--red);   font-size: 11px; font-weight: 600; }
+    .seg-delta-nil { color: var(--muted); font-size: 11px; }
+
+    .time-bar { display: flex; gap: 4px; }
+    .time-btn {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--muted); padding: 5px 11px; border-radius: 5px;
+      cursor: pointer; font-size: 12px; font-weight: 600; transition: all .15s;
+    }
+    .time-btn:hover  { color: var(--text); }
+    .time-btn.active { background: var(--surface-3); color: var(--accent); border-color: var(--accent); }
+
+    .trends-stat-boxes {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px;
+    }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">⚾ MLB Market</div>
+    <nav class="nav">
+      <button class="nav-btn" data-page="search">Player Search</button>
+      <button class="nav-btn" data-page="market">Market Browser</button>
+      <button class="nav-btn" data-page="trends">Market Trends</button>
+    </nav>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- ── Dashboard (landing) page ─────────────────────────── -->
+  <div id="page-dashboard" class="page active">
+    <div id="dash-content">
+      <div class="placeholder">Loading market data…</div>
+    </div>
+  </div>
+
+  <!-- ── Search page ───────────────────────────────────────── -->
+  <div id="page-search" class="page">
+    <div class="search-wrap">
+      <input id="search-input" type="text" placeholder="Search for a player…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="search-layout">
+
+      <div class="results-col">
+        <div class="results-inner" id="results-inner">
+          <div class="placeholder">Start typing to search</div>
+        </div>
+      </div>
+
+      <div class="detail-col" id="detail-col">
+        <div class="placeholder">Select a card to view details</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Market Browser page ───────────────────────────────── -->
+  <div id="page-market" class="page">
+
+    <div class="filters-panel">
+      <div class="filter-rows">
+
+        <!-- Row 1: text + dropdowns -->
+        <div class="filter-row">
+          <div class="fg fg-wide">
+            <label>Player Name</label>
+            <input id="f-q" type="text" placeholder="Search name…">
+          </div>
+          <div class="fg">
+            <label>Rarity</label>
+            <select id="f-rarity"><option value="">All Rarities</option></select>
+          </div>
+          <div class="fg fg-wide">
+            <label>Team</label>
+            <select id="f-team"><option value="">All Teams</option></select>
+          </div>
+          <div class="fg fg-wide">
+            <label>Series</label>
+            <select id="f-series"><option value="">All Series</option></select>
+          </div>
+          <div class="fg">
+            <label>Type</label>
+            <select id="f-type">
+              <option value="">All</option>
+              <option value="hitter">Hitters</option>
+              <option value="pitcher">Pitchers</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Bat Hand</label>
+            <select id="f-bat">
+              <option value="">Any</option>
+              <option value="L">Left</option>
+              <option value="R">Right</option>
+              <option value="S">Switch</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Throw Hand</label>
+            <select id="f-throw">
+              <option value="">Any</option>
+              <option value="L">Left</option>
+              <option value="R">Right</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Row 2: price filters + actions -->
+        <div class="filter-row">
+          <div class="fg fg-xs"><label>Buy Now ≥</label><input id="f-min-sell" type="number" min="0" placeholder="0"></div>
+          <div class="fg fg-xs"><label>Buy Now ≤</label><input id="f-max-sell" type="number" min="0" placeholder="∞"></div>
+          <div class="fg fg-xs"><label>Sell Now ≥</label><input id="f-min-buy" type="number" min="0" placeholder="0"></div>
+          <div class="fg fg-xs"><label>Sell Now ≤</label><input id="f-max-buy" type="number" min="0" placeholder="∞"></div>
+          <div class="fg">
+            <label>Limit</label>
+            <select id="f-limit">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+          </div>
+          <div class="fg" style="margin-left:auto; flex-direction:row; gap:8px; align-items:flex-end;">
+            <button class="btn btn-primary" onclick="loadMarket()">Apply Filters</button>
+            <button class="btn btn-ghost"   onclick="resetFilters()">Reset</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="table-header">
+      <span style="font-size:13px;font-weight:600;">Market Results</span>
+      <span class="result-count" id="result-count"></span>
+    </div>
+    <div class="market-table-wrap">
+      <table id="market-table">
+        <thead>
+          <tr>
+            <th class="no-sort">Card</th>
+            <th class="no-sort">Pos</th>
+            <th class="no-sort">Team</th>
+            <th data-sort="ovr">OVR</th>
+            <th class="no-sort">Rarity</th>
+            <th class="no-sort">Series</th>
+            <th class="no-sort">Bat</th>
+            <th class="no-sort">Throw</th>
+            <th class="no-sort">Age</th>
+            <th data-sort="sell">Buy Now</th>
+            <th data-sort="buy">Sell Now</th>
+            <th data-sort="spread">Spread</th>
+            <th data-sort="spread_pct">Spread %</th>
+            <th data-sort="quicksell_value">QS Value</th>
+            <th data-sort="flip_profit">Flip Profit</th>
+            <th data-sort="flip_profit_pct">Flip %</th>
+          </tr>
+        </thead>
+        <tbody id="market-tbody">
+          <tr><td colspan="16" class="no-data">Click "Apply Filters" to load market data</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- ── Market Trends page ────────────────────────────────── -->
+  <div id="page-trends" class="page">
+
+    <div class="trends-tabs">
+      <button class="ttab active" data-type="overall">Overall</button>
+      <button class="ttab" data-type="rarity">By Rarity</button>
+      <button class="ttab" data-type="ovr">By Overall</button>
+      <button class="ttab" data-type="position">By Position</button>
+    </div>
+
+    <div class="trends-layout">
+
+      <div class="results-col">
+        <div class="results-inner" id="trends-list-inner">
+          <div class="placeholder">Loading…</div>
+        </div>
+      </div>
+
+      <div class="detail-col" id="trends-detail-col">
+        <div class="placeholder">Select a segment to view trends</div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let priceChart     = null;
+let searchTimer    = null;
+let filtersLoaded  = false;
+let marketSort     = { col: 'spread', order: 'desc' };
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const fmt     = n  => (n != null && n !== '') ? Number(n).toLocaleString()            : '—';
+const fmtPct  = n  => (n != null && n !== '') ? `${Number(n).toFixed(1)}%`            : '—';
+const cap     = s  => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+const rCls    = r  => r ? `r-${r.toLowerCase()}`  : '';
+const rBorder = r  => r ? `rb-${r.toLowerCase()}` : '';
+const rBadge  = r  => r ? `badge-${r.toLowerCase()}` : '';
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, {month:'short',day:'numeric'}) + ' ' +
+         d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const page = btn.dataset.page;
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`page-${page}`).classList.add('active');
+    if (page === 'market' && !filtersLoaded) loadFilters();
+    if (page === 'trends') loadTrends();
+  });
+});
+
+// Logo → dashboard
+document.querySelector('.logo').addEventListener('click', () => {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-dashboard').classList.add('active');
+  loadDashboard();
+});
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const el = document.getElementById('dash-content');
+  el.innerHTML = '<div class="placeholder">Loading market data…</div>';
+
+  const data = await fetch('/api/dashboard').then(r => r.json());
+
+  const sections = [
+    {
+      key: 'top_flip_profit', title: 'Top Flip Profit',
+      sub: 'Highest stub profit after 10% tax — buy the bid, list at the ask',
+      metric: r => ({
+        cls: 'm-pos',
+        val: `+${fmt(r.flip_profit)}`,
+        sub: `${fmtPct(r.flip_profit_pct)} return on bid`,
+      }),
+    },
+    {
+      key: 'top_flip_pct', title: 'Top Flip %',
+      sub: 'Highest % return on bid after 10% tax',
+      metric: r => ({
+        cls: 'm-pos',
+        val: `+${fmtPct(r.flip_profit_pct)}`,
+        sub: `+${fmt(r.flip_profit)} stubs profit`,
+      }),
+    },
+    {
+      key: 'movers_up', title: 'Biggest Movers Up',
+      sub: 'Largest Buy Now price increase vs. first recorded price',
+      metric: r => ({
+        cls: 'm-pos',
+        val: `+${fmt(r.price_change)}`,
+        sub: `+${Number(r.change_pct).toFixed(1)}% vs first recorded`,
+      }),
+    },
+    {
+      key: 'movers_down', title: 'Biggest Movers Down',
+      sub: 'Largest Buy Now price decrease vs. first recorded price',
+      metric: r => ({
+        cls: 'm-neg',
+        val: `${fmt(r.price_change)}`,
+        sub: `${Number(r.change_pct).toFixed(1)}% vs first recorded`,
+      }),
+    },
+  ];
+
+  el.innerHTML = sections.map(s => {
+    const cards = data[s.key] || [];
+    return `
+      <div class="dash-section">
+        <div class="dash-heading">${s.title}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">${s.sub}</div>
+        ${cards.length === 0
+          ? `<div class="no-data">No data yet — run more price snapshots to build history.</div>`
+          : `<div class="dash-cards">${cards.map(r => _dashCard(r, s.metric(r))).join('')}</div>`
+        }
+      </div>`;
+  }).join('');
+}
+
+function _dashCard(r, metric) {
+  const bc = r.rarity ? `dbc-${r.rarity.toLowerCase()}` : '';
+  return `
+    <div class="dash-card ${bc}" onclick="loadCard('${r.uuid}', true)" title="${r.name}">
+      ${r.img
+        ? `<img src="${r.img}" alt="" class="dash-card-img" onerror="this.style.display='none'">`
+        : '<div class="dash-card-img"></div>'}
+      <div class="dash-card-name">${r.name}</div>
+      <div class="dash-card-meta">
+        <span class="${rCls(r.rarity)}">${cap(r.rarity)}</span>
+        &middot; ${r.ovr ?? '—'} OVR &middot; ${r.display_position ?? '—'}
+      </div>
+      <div class="dash-card-prices">
+        <span class="c-sell">${fmt(r.best_sell_price)}</span>
+        <span style="color:var(--border)">/</span>
+        <span class="c-buy">${fmt(r.best_buy_price)}</span>
+      </div>
+      <div class="dash-metric ${metric.cls}">
+        ${metric.val}
+        <div class="dash-metric-sub">${metric.sub}</div>
+      </div>
+    </div>`;
+}
+
+// Auto-load dashboard on page open
+loadDashboard();
+
+// ── Search page ───────────────────────────────────────────────────────────────
+document.getElementById('search-input').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (q.length < 2) {
+    document.getElementById('results-inner').innerHTML = '<div class="placeholder">Start typing to search</div>';
+    return;
+  }
+  searchTimer = setTimeout(() => fetchSearch(q), 280);
+});
+
+async function fetchSearch(q) {
+  const data = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+  renderResults(data);
+}
+
+function renderResults(cards) {
+  const el = document.getElementById('results-inner');
+  if (!cards.length) {
+    el.innerHTML = '<div class="placeholder">No results found</div>';
+    return;
+  }
+  el.innerHTML = cards.map(c => `
+    <div class="result-item ${rBorder(c.rarity)}" data-uuid="${c.uuid}" onclick="loadCard('${c.uuid}')">
+      <div class="result-top">
+        <span class="result-name">${c.name}</span>
+        <span class="result-ovr">${c.ovr ?? '—'}</span>
+      </div>
+      <div class="result-meta">
+        <span class="${rCls(c.rarity)}">${cap(c.rarity) ?? ''}</span>
+        <span>${c.display_position ?? ''}</span>
+        <span>${c.team ?? ''}</span>
+      </div>
+      <div class="result-prices">
+        ${c.best_sell_price != null
+          ? `<span class="c-sell">${fmt(c.best_sell_price)}</span>
+             <span style="color:var(--border)">→</span>
+             <span class="c-buy">${fmt(c.best_buy_price)}</span>`
+          : `<span style="color:var(--muted)">No price data</span>`}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadCard(uuid, switchTab = false) {
+  if (switchTab) {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-page="search"]').classList.add('active');
+    document.getElementById('page-search').classList.add('active');
+  }
+
+  // Highlight selected result
+  document.querySelectorAll('.result-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.uuid === uuid);
+  });
+
+  const [card, history] = await Promise.all([
+    fetch(`/api/card/${uuid}`).then(r => r.json()),
+    fetch(`/api/card/${uuid}/history`).then(r => r.json()),
+  ]);
+
+  renderDetail(card, history);
+}
+
+function renderDetail(card, history) {
+  const el = document.getElementById('detail-col');
+
+  const handParts = [];
+  if (card.bat_hand)   handParts.push(`Bat: <strong>${card.bat_hand}</strong>`);
+  if (card.throw_hand) handParts.push(`Throw: <strong>${card.throw_hand}</strong>`);
+  if (card.age)        handParts.push(`Age: <strong>${card.age}</strong>`);
+
+  const metaItems = [
+    card.display_position ? ['Position', card.display_position] : null,
+    card.team             ? ['Team',     card.team]             : null,
+    card.series           ? ['Series',   card.series]           : null,
+    card.is_hitter != null? ['Type',     card.is_hitter ? 'Hitter' : 'Pitcher'] : null,
+  ].filter(Boolean);
+
+  el.innerHTML = `
+    <div class="detail-inner">
+      <div class="card-header">
+        ${card.img
+          ? `<img src="${card.img}" alt="${card.name}" class="card-img" onerror="this.style.display='none'">`
+          : ''}
+        <div class="card-info">
+          <div class="card-name">${card.name}</div>
+          <div class="badges">
+            <span class="badge">${card.ovr ?? '—'} OVR</span>
+            <span class="badge ${rBadge(card.rarity)}">${cap(card.rarity) ?? ''}</span>
+          </div>
+          <div class="meta-grid">
+            ${metaItems.map(([lbl, val]) => `
+              <div class="meta-row">
+                <span class="meta-label">${lbl}</span>
+                <span>${val}</span>
+              </div>`).join('')}
+            ${handParts.map(h => `<div class="meta-row" style="color:var(--text)">${h}</div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      ${card.best_sell_price != null ? `
+        <div class="price-boxes">
+          <div class="price-box">
+            <div class="pb-label">Buy Now</div>
+            <div class="pb-value c-sell">${fmt(card.best_sell_price)}</div>
+            <div class="pb-sub">stubs</div>
+          </div>
+          <div class="price-box">
+            <div class="pb-label">Sell Now</div>
+            <div class="pb-value c-buy">${fmt(card.best_buy_price)}</div>
+            <div class="pb-sub">stubs</div>
+          </div>
+          <div class="price-box">
+            <div class="pb-label">Spread</div>
+            <div class="pb-value c-spread">${fmt(card.spread)}</div>
+            <div class="pb-sub">${fmtPct(card.spread_pct)}</div>
+          </div>
+          <div class="price-box">
+            <div class="pb-label">QS Value</div>
+            <div class="pb-value c-qs">${fmt(card.quicksell_value)}</div>
+            <div class="pb-sub">stubs</div>
+          </div>
+          <div class="price-box">
+            <div class="pb-label">Flip Profit</div>
+            <div class="pb-value ${card.flip_profit != null && card.flip_profit >= 0 ? 'c-flip-pos' : 'c-flip-neg'}">${fmt(card.flip_profit)}</div>
+            <div class="pb-sub">after 10% tax</div>
+          </div>
+          <div class="price-box">
+            <div class="pb-label">Flip %</div>
+            <div class="pb-value ${card.flip_profit_pct != null && card.flip_profit_pct >= 0 ? 'c-flip-pos' : 'c-flip-neg'}">${fmtPct(card.flip_profit_pct)}</div>
+            <div class="pb-sub">return on bid</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:18px;">
+          Last updated: ${fmtTime(card.fetched_at)}
+        </div>
+      ` : '<div class="no-data">No price data available</div>'}
+
+      <div class="chart-section">
+        <div class="section-title">Price History</div>
+        ${history.length >= 2
+          ? `<div class="chart-wrap"><canvas id="price-chart"></canvas></div>`
+          : `<div class="no-data">${history.length === 0
+               ? 'No price history recorded yet'
+               : 'Not enough data points to display chart (need at least 2)'}</div>`}
+      </div>
+    </div>
+  `;
+
+  if (history.length >= 2) renderChart(history);
+}
+
+function renderChart(history) {
+  if (priceChart) { priceChart.destroy(); priceChart = null; }
+
+  const labels = history.map(h => {
+    const d = new Date(h.fetched_at);
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
+           d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  });
+
+  const dot = history.length > 60 ? 0 : 3;
+
+  priceChart = new Chart(
+    document.getElementById('price-chart').getContext('2d'),
+    {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Buy Now',
+            data: history.map(h => h.best_sell_price),
+            borderColor: '#f05454',
+            backgroundColor: 'rgba(240,84,84,0.08)',
+            fill: false,
+            tension: 0.3,
+            pointRadius: dot,
+            pointHoverRadius: 5,
+            borderWidth: 2,
+          },
+          {
+            label: 'Sell Now',
+            data: history.map(h => h.best_buy_price),
+            borderColor: '#4caf82',
+            backgroundColor: 'rgba(76,175,130,0.08)',
+            fill: false,
+            tension: 0.3,
+            pointRadius: dot,
+            pointHoverRadius: 5,
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { labels: { color: '#7e85a3', boxWidth: 12, font: { size: 12 } } },
+          tooltip: {
+            backgroundColor: '#22263a',
+            borderColor: '#2e3356',
+            borderWidth: 1,
+            callbacks: {
+              label: ctx => ` ${ctx.dataset.label}: ${Number(ctx.raw).toLocaleString()} stubs`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#7e85a3', maxTicksLimit: 8, maxRotation: 0, font: { size: 11 } },
+            grid: { color: '#1e2236' },
+          },
+          y: {
+            ticks: {
+              color: '#7e85a3',
+              font: { size: 11 },
+              callback: v => Number(v).toLocaleString(),
+            },
+            grid: { color: '#1e2236' },
+          },
+        },
+      },
+    }
+  );
+}
+
+// ── Market page ───────────────────────────────────────────────────────────────
+async function loadFilters() {
+  filtersLoaded = true;
+  const data = await fetch('/api/filters').then(r => r.json());
+
+  function populate(id, items) {
+    const el = document.getElementById(id);
+    items.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = v;
+      el.appendChild(o);
+    });
+  }
+
+  populate('f-rarity', data.rarities);
+  populate('f-team',   data.teams);
+  populate('f-series', data.series);
+}
+
+async function loadMarket() {
+  const p = new URLSearchParams();
+  const g = id => document.getElementById(id).value;
+  const a = (key, id) => { const v = g(id); if (v) p.set(key, v); };
+
+  a('q',       'f-q');
+  a('min_sell','f-min-sell');
+  a('max_sell','f-max-sell');
+  a('min_buy', 'f-min-buy');
+  a('max_buy', 'f-max-buy');
+  a('rarity',  'f-rarity');
+  a('team',    'f-team');
+  a('series',  'f-series');
+  a('bat_hand',  'f-bat');
+  a('throw_hand','f-throw');
+
+  const type = g('f-type');
+  if (type === 'hitter')  p.set('is_hitter', '1');
+  if (type === 'pitcher') p.set('is_hitter', '0');
+
+  p.set('sort',  marketSort.col);
+  p.set('order', marketSort.order);
+  p.set('limit', g('f-limit') || '100');
+
+  document.getElementById('result-count').textContent = 'Loading…';
+  const rows = await fetch(`/api/market?${p}`).then(r => r.json());
+  document.getElementById('result-count').textContent = `${rows.length} result${rows.length !== 1 ? 's' : ''}`;
+  renderMarketTable(rows);
+}
+
+function renderMarketTable(rows) {
+  const tbody = document.getElementById('market-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="16" class="no-data">No results — try adjusting your filters</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const spreadPctCls = r.spread_pct > 50 ? 'tc-hi'
+                       : r.spread_pct > 20 ? 'tc-med'
+                       : 'tc-lo';
+    return `
+      <tr class="mrow" onclick="loadCard('${r.uuid}', true)">
+        <td>
+          <div class="name-cell">
+            ${r.img ? `<img src="${r.img}" alt="" class="mini-img" onerror="this.style.display='none'">` : ''}
+            <span class="name-text">${r.name}</span>
+          </div>
+        </td>
+        <td>${r.display_position ?? '—'}</td>
+        <td>${r.team ?? '—'}</td>
+        <td class="ovr-cell">${r.ovr ?? '—'}</td>
+        <td><span class="${rCls(r.rarity)}">${cap(r.rarity)}</span></td>
+        <td>${r.series ?? '—'}</td>
+        <td>${r.bat_hand ?? '—'}</td>
+        <td>${r.throw_hand ?? '—'}</td>
+        <td>${r.age ?? '—'}</td>
+        <td class="tc-sell">${fmt(r.best_sell_price)}</td>
+        <td class="tc-buy">${fmt(r.best_buy_price)}</td>
+        <td class="tc-spread">${fmt(r.spread)}</td>
+        <td class="${spreadPctCls}">${fmtPct(r.spread_pct)}</td>
+        <td style="color:var(--yellow);font-weight:600;">${fmt(r.quicksell_value)}</td>
+        <td class="${r.flip_profit != null && r.flip_profit >= 0 ? 'tc-buy' : 'tc-sell'}">${fmt(r.flip_profit)}</td>
+        <td class="${r.flip_profit_pct != null && r.flip_profit_pct >= 0 ? 'tc-buy' : 'tc-sell'}">${fmtPct(r.flip_profit_pct)}</td>
+      </tr>`;
+  }).join('');
+}
+
+function resetFilters() {
+  ['f-q','f-min-sell','f-max-sell','f-min-buy','f-max-buy'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  ['f-rarity','f-team','f-series','f-bat','f-throw','f-type'].forEach(id => {
+    document.getElementById(id).selectedIndex = 0;
+  });
+  document.getElementById('f-limit').value = '100';
+}
+
+// ── Sortable market columns ───────────────────────────────────────────────────
+document.querySelectorAll('#market-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (marketSort.col === col) {
+      marketSort.order = marketSort.order === 'desc' ? 'asc' : 'desc';
+    } else {
+      marketSort.col   = col;
+      marketSort.order = 'desc';
+    }
+    document.querySelectorAll('#market-table th[data-sort]').forEach(t => {
+      t.classList.toggle('sort-active', t.dataset.sort === marketSort.col);
+      if (t.dataset.sort === marketSort.col) t.dataset.order = marketSort.order;
+    });
+    loadMarket();
+  });
+});
+
+// Set initial sort indicator
+document.querySelector('#market-table th[data-sort="spread"]').classList.add('sort-active');
+document.querySelector('#market-table th[data-sort="spread"]').dataset.order = 'desc';
+
+// ── Trends page ────────────────────────────────────────────────────────────────
+let trendsAllData  = [];
+let trendsType     = 'overall';
+let trendsSegment  = null;
+let trendsHours    = 24;
+let trendsChart    = null;
+
+async function loadTrends() {
+  document.getElementById('trends-list-inner').innerHTML =
+    '<div class="placeholder">Loading…</div>';
+  trendsAllData = await fetch('/api/index/segments').then(r => r.json());
+  renderTrendsList();
+  // Auto-select first item in current tab
+  const first = trendsAllData
+    .filter(r => r.type === trendsType)
+    .sort((a, b) => (a.sort_key ?? 99) - (b.sort_key ?? 99))[0];
+  if (first) selectTrendsSegment(first.segment);
+}
+
+function renderTrendsList() {
+  const el = document.getElementById('trends-list-inner');
+  const filtered = trendsAllData
+    .filter(r => r.type === trendsType)
+    .sort((a, b) => (a.sort_key ?? 99) - (b.sort_key ?? 99));
+
+  if (!filtered.length) {
+    el.innerHTML = `<div class="placeholder" style="flex-direction:column;gap:8px;">
+      <div>No index data yet.</div>
+      <div style="font-size:12px;">Run:<br><code>python scripts/compute_index.py</code></div>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(r => {
+    const pct = r.delta_1h_pct;
+    let deltaHtml;
+    if (pct == null) {
+      deltaHtml = `<span class="seg-delta-nil">—</span>`;
+    } else if (pct >= 0) {
+      deltaHtml = `<span class="seg-delta-pos">▲${pct.toFixed(1)}%</span>`;
+    } else {
+      deltaHtml = `<span class="seg-delta-neg">▼${Math.abs(pct).toFixed(1)}%</span>`;
+    }
+    const active = r.segment === trendsSegment ? 'active' : '';
+    return `
+      <div class="seg-item ${active}" onclick="selectTrendsSegment('${r.segment}')">
+        <div class="seg-top">
+          <span class="seg-name">${r.label}</span>
+          ${deltaHtml}
+        </div>
+        <div class="seg-sub">
+          ${r.mean_sell != null
+            ? `<span class="c-sell">${fmt(Math.round(r.mean_sell))}</span> mean buy now`
+            : 'No data'}
+          ${r.card_count != null ? ` · ${r.card_count.toLocaleString()} cards` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function selectTrendsSegment(segment) {
+  trendsSegment = segment;
+  renderTrendsList();   // update active highlight
+
+  const [history] = await Promise.all([
+    fetch(`/api/index/history?segment=${encodeURIComponent(segment)}&hours=${trendsHours}`)
+      .then(r => r.json()),
+  ]);
+  const segData = trendsAllData.find(r => r.segment === segment) || {};
+  renderTrendsDetail(segData, history);
+}
+
+function renderTrendsDetail(seg, history) {
+  const el = document.getElementById('trends-detail-col');
+
+  const fmtDelta = (d, pct) => {
+    if (d == null) return `<span style="color:var(--muted)">No prior data</span>`;
+    const sign  = d >= 0 ? '+' : '';
+    const color = d >= 0 ? 'var(--green)' : 'var(--red)';
+    const arrow = d >= 0 ? '▲' : '▼';
+    return `<span style="color:${color};font-weight:700;">${arrow} ${sign}${fmt(Math.round(d))}</span>
+            <span style="color:${color};font-size:13px;"> (${sign}${(pct||0).toFixed(1)}%)</span>`;
+  };
+
+  const timeBtns = [6, 24, 168, 720].map(h => {
+    const lbl = h === 6 ? '6H' : h === 24 ? '24H' : h === 168 ? '7D' : '30D';
+    const active = h === trendsHours ? 'active' : '';
+    return `<button class="time-btn ${active}" onclick="setTrendsWindow(${h})">${lbl}</button>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="detail-inner">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="font-size:18px;font-weight:700;">${seg.label ?? '—'}</div>
+        <div class="time-bar">${timeBtns}</div>
+      </div>
+
+      <div class="trends-stat-boxes">
+        <div class="price-box">
+          <div class="pb-label">Cards Tracked</div>
+          <div class="pb-value c-spread">${fmt(seg.card_count)}</div>
+          <div class="pb-sub">in segment</div>
+        </div>
+        <div class="price-box">
+          <div class="pb-label">Mean Buy Now</div>
+          <div class="pb-value c-sell">${seg.mean_sell != null ? fmt(Math.round(seg.mean_sell)) : '—'}</div>
+          <div class="pb-sub">stubs</div>
+        </div>
+        <div class="price-box">
+          <div class="pb-label">Mean Sell Now</div>
+          <div class="pb-value c-buy">${seg.mean_buy != null ? fmt(Math.round(seg.mean_buy)) : '—'}</div>
+          <div class="pb-sub">stubs</div>
+        </div>
+        <div class="price-box">
+          <div class="pb-label">1H Change</div>
+          <div class="pb-value" style="font-size:15px;line-height:1.4;">${fmtDelta(seg.delta_1h, seg.delta_1h_pct)}</div>
+          <div class="pb-sub">mean buy now</div>
+        </div>
+        <div class="price-box">
+          <div class="pb-label">24H Change</div>
+          <div class="pb-value" style="font-size:15px;line-height:1.4;">${fmtDelta(seg.delta_24h, seg.delta_24h_pct)}</div>
+          <div class="pb-sub">mean buy now</div>
+        </div>
+      </div>
+
+      <div class="chart-section">
+        <div class="section-title">Mean Price History
+          <span style="font-weight:400;color:var(--muted);margin-left:8px;">
+            — solid = mean &nbsp;· · · dashed = median
+          </span>
+        </div>
+        ${history.length >= 2
+          ? `<div class="chart-wrap" style="height:300px;"><canvas id="trends-canvas"></canvas></div>`
+          : `<div class="no-data">${history.length === 0
+               ? 'No history yet — run compute_index.py to start building data.'
+               : 'Need at least 2 snapshots for a chart.'}</div>`}
+      </div>
+
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);">
+        Last computed: ${seg.computed_at ? fmtTime(seg.computed_at + 'Z') : '—'}
+      </div>
+    </div>
+  `;
+
+  if (history.length >= 2) _renderTrendsChart(history);
+}
+
+function _renderTrendsChart(history) {
+  if (trendsChart) { trendsChart.destroy(); trendsChart = null; }
+
+  const labels = history.map(h => {
+    const d = new Date(h.computed_at.replace(' ', 'T') + 'Z');
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
+           d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  });
+
+  const dot = history.length > 60 ? 0 : 3;
+
+  trendsChart = new Chart(
+    document.getElementById('trends-canvas').getContext('2d'),
+    {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Mean Buy Now',
+            data: history.map(h => h.mean_sell ? Math.round(h.mean_sell) : null),
+            borderColor: '#f05454', backgroundColor: 'rgba(240,84,84,0.07)',
+            fill: false, tension: 0.3, pointRadius: dot, pointHoverRadius: 5, borderWidth: 2,
+          },
+          {
+            label: 'Mean Sell Now',
+            data: history.map(h => h.mean_buy ? Math.round(h.mean_buy) : null),
+            borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.07)',
+            fill: false, tension: 0.3, pointRadius: dot, pointHoverRadius: 5, borderWidth: 2,
+          },
+          {
+            label: 'Median Buy Now',
+            data: history.map(h => h.median_sell ? Math.round(h.median_sell) : null),
+            borderColor: '#f05454', borderDash: [5, 4],
+            fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5,
+          },
+          {
+            label: 'Median Sell Now',
+            data: history.map(h => h.median_buy ? Math.round(h.median_buy) : null),
+            borderColor: '#4caf82', borderDash: [5, 4],
+            fill: false, tension: 0.3, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5,
+          },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { labels: { color: '#7e85a3', boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            backgroundColor: '#22263a', borderColor: '#2e3356', borderWidth: 1,
+            callbacks: {
+              label: ctx => ` ${ctx.dataset.label}: ${Number(ctx.raw).toLocaleString()} stubs`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#7e85a3', maxTicksLimit: 8, maxRotation: 0, font: { size: 11 } },
+            grid: { color: '#1e2236' },
+          },
+          y: {
+            ticks: { color: '#7e85a3', font: { size: 11 }, callback: v => Number(v).toLocaleString() },
+            grid: { color: '#1e2236' },
+          },
+        },
+      },
+    }
+  );
+}
+
+async function setTrendsWindow(hours) {
+  trendsHours = hours;
+  if (trendsSegment) selectTrendsSegment(trendsSegment);
+}
+
+// ── Trends tab switching ──────────────────────────────────────────────────────
+document.querySelectorAll('.ttab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ttab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    trendsType    = btn.dataset.type;
+    trendsSegment = null;
+    renderTrendsList();
+    document.getElementById('trends-detail-col').innerHTML =
+      '<div class="placeholder">Select a segment to view trends</div>';
+  });
+});
+</script>
+
+</body>
+</html>

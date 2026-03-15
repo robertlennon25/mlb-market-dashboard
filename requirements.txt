@@ -1,0 +1,23 @@
+# --- HTTP / API ---
+requests>=2.31.0
+urllib3>=2.0.0
+
+# --- Scheduling ---
+schedule>=1.2.0
+
+# --- Terminal output ---
+rich>=13.0.0
+
+# --- Data / analysis (optional but useful for gap analysis) ---
+pandas>=2.0.0
+
+# --- Backend API (Phase 2: Flask or FastAPI, pick one) ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+# flask>=3.0.0         # uncomment if you prefer Flask
+
+# --- Database extras (SQLite is built-in, but these help) ---
+# sqlalchemy>=2.0.0   # uncomment if you want ORM support later
+
+# --- Dev / testing ---
+python-dotenv>=1.0.0  # load .env config files
