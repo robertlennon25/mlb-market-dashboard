@@ -53,7 +53,7 @@ def _scheduler_loop():
         except Exception as e:
             _logger.error("Scheduled fetch failed: %s", e, exc_info=True)
 
-    _schedule.every(15).minutes.do(_job)
+    _schedule.every(5).minutes.do(_job)
     while True:
         _schedule.run_pending()
         time.sleep(30)
