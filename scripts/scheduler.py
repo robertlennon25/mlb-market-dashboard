@@ -28,16 +28,17 @@ except ImportError:
     print("Install schedule: pip install schedule")
     sys.exit(1)
 
-from log_setup import setup_logging
 from fetch_listings import run as fetch_run
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def job(card_type: str, rarity: str | None, archive: bool):
-    logger.info("⏰  Scheduled fetch starting…")
+    logger.info("Scheduled fetch starting…")
     try:
         fetch_run(card_type=card_type, rarity=rarity, archive=archive)
+        logger.info("Scheduled fetch complete.")
     except Exception as e:
         logger.error("Fetch failed: %s", e, exc_info=True)
 
@@ -52,7 +53,6 @@ def main():
                         help="Save raw JSON each run")
     args = parser.parse_args()
 
-    setup_logging("scheduler")
     logger.info("Scheduler starting: every %d minutes (type=%s rarity=%s)",
                 args.interval, args.card_type, args.rarity or "all")
 

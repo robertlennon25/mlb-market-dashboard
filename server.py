@@ -18,6 +18,14 @@ from typing import Optional
 
 import threading
 import subprocess
+import logging
+import time
+
+try:
+    import schedule as _schedule
+    _HAS_SCHEDULE = True
+except ImportError:
+    _HAS_SCHEDULE = False
 
 import db as _db
 from db import get_conn
@@ -25,6 +33,30 @@ from config.settings import quicksell_value, flip_profit, flip_profit_pct
 
 # Track background fetch state so /api/status can report progress
 _fetch_state = {"status": "idle", "message": ""}
+
+
+_logger = logging.getLogger("server")
+
+
+def _scheduler_loop():
+    """Background thread: re-fetch listings + recompute index every 15 minutes."""
+    if not _HAS_SCHEDULE:
+        _logger.warning("'schedule' package not installed — recurring fetches disabled")
+        return
+
+    def _job():
+        _logger.info("Scheduled fetch starting…")
+        try:
+            subprocess.run([sys.executable, "scripts/fetch_listings.py"], check=True)
+            subprocess.run([sys.executable, "scripts/compute_index.py"], check=True)
+            _logger.info("Scheduled fetch complete.")
+        except Exception as e:
+            _logger.error("Scheduled fetch failed: %s", e, exc_info=True)
+
+    _schedule.every(15).minutes.do(_job)
+    while True:
+        _schedule.run_pending()
+        time.sleep(30)
 
 
 def _background_fetch():
@@ -54,6 +86,8 @@ async def lifespan(app: FastAPI):
         _fetch_state["status"]  = "pending"
         _fetch_state["message"] = "Empty database detected — starting initial data fetch…"
         threading.Thread(target=_background_fetch, daemon=True).start()
+    # Always start the recurring 15-minute scheduler regardless of DB state
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
     yield
 
 app = FastAPI(title="MLB Market Tracker", lifespan=lifespan)
