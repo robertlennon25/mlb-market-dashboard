@@ -11,7 +11,7 @@ __pycache__/
 .Python
 
 # Local database and raw data snapshots — live on Railway volume, not in git
-data/
+# data/
 
 # Environment files
 .env
