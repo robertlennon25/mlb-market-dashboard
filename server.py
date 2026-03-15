@@ -16,14 +16,44 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from typing import Optional
 
+import threading
+import subprocess
+
 import db as _db
 from db import get_conn
 from config.settings import quicksell_value, flip_profit, flip_profit_pct
 
+# Track background fetch state so /api/status can report progress
+_fetch_state = {"status": "idle", "message": ""}
+
+
+def _background_fetch():
+    """Runs fetch_items then fetch_listings in a background thread on first boot."""
+    global _fetch_state
+    try:
+        _fetch_state = {"status": "running", "message": "Fetching card metadata…"}
+        subprocess.run([sys.executable, "scripts/fetch_items.py"], check=True)
+
+        _fetch_state = {"status": "running", "message": "Fetching market prices…"}
+        subprocess.run([sys.executable, "scripts/fetch_listings.py"], check=True)
+
+        # Build the initial market index from the fresh data
+        subprocess.run([sys.executable, "scripts/compute_index.py"], check=True)
+
+        _fetch_state = {"status": "done", "message": "Initial data load complete."}
+    except Exception as e:
+        _fetch_state = {"status": "error", "message": str(e)}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _db.init_db()   # ensure schema exists on every cold start (safe: CREATE IF NOT EXISTS)
+    _db.init_db()
+    # On first deploy the DB will be empty — kick off a background fetch so the
+    # server starts immediately (health check passes) while data loads in parallel.
+    if _db.card_count() == 0:
+        _fetch_state["status"]  = "pending"
+        _fetch_state["message"] = "Empty database detected — starting initial data fetch…"
+        threading.Thread(target=_background_fetch, daemon=True).start()
     yield
 
 app = FastAPI(title="MLB Market Tracker", lifespan=lifespan)
@@ -71,6 +101,16 @@ def _enrich(row: dict) -> dict:
 # ---------------------------------------------------------------------------
 # API routes  (must be defined before the static-file catch-all mount)
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/status")
+def status():
+    """Health + data readiness check."""
+    return {
+        "cards":     _db.card_count(),
+        "snapshots": _db.snapshot_count(),
+        "fetch":     _fetch_state,
+    }
 
 
 @app.get("/api/search")

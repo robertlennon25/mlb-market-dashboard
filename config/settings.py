@@ -33,8 +33,9 @@ REQUEST_DELAY = 0.3
 MIN_SPREAD_THRESHOLD = 500
 
 # Database path
-# On Railway: set DATABASE_PATH=/data/market.db (volume mounted at /data)
-# Locally:    falls back to data/db/market.db relative to the project root
+# Reads DATABASE_PATH env var if set (Railway volume: /data/market.db).
+# Falls back to data/db/market.db next to the project root.
+# db.get_conn() calls os.makedirs so the directory is created automatically.
 import os
 _default_db = os.path.join(os.path.dirname(__file__), "..", "data", "db", "market.db")
 DB_PATH = os.environ.get("DATABASE_PATH", os.path.normpath(_default_db))
