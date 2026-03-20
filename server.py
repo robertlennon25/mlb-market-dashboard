@@ -514,10 +514,23 @@ def index_history(
 
 from config.settings import DB_PATH as _DB_PATH
 
+@app.get("/admin/db-info")
+def db_info():
+    """Debug: confirm DB path and row counts before downloading."""
+    with get_conn() as conn:
+        cards     = conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+        snapshots = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+        latest    = conn.execute("SELECT MAX(fetched_at) FROM price_history").fetchone()[0]
+    return {"path": _DB_PATH, "cards": cards, "snapshots": snapshots, "latest_snapshot": latest}
+
+
 @app.get("/admin/download-db")
 def download_db():
     if not os.path.exists(_DB_PATH):
         raise HTTPException(status_code=404, detail=f"DB not found at {_DB_PATH}")
+    # Flush WAL into the main file so the download contains all data
+    with get_conn() as conn:
+        conn.execute("PRAGMA wal_checkpoint(FULL)")
     return FileResponse(_DB_PATH, filename="market_backup.db", media_type="application/octet-stream")
 
 
