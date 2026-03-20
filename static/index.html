@@ -153,10 +153,23 @@
 
     /* ── Chart ───────────────────────────────────────────────── */
     .chart-section { }
+    .chart-section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .chart-section-header .section-title { margin-bottom: 0; }
     .section-title {
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: .6px; color: var(--muted); margin-bottom: 10px;
     }
+    .history-tabs { display: flex; gap: 4px; }
+    .htab {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--muted); padding: 4px 10px; border-radius: 5px;
+      cursor: pointer; font-size: 11px; font-weight: 500; transition: all .15s;
+    }
+    .htab:hover  { background: var(--surface-3); color: var(--text); }
+    .htab.active { background: var(--surface-3); border-color: var(--accent); color: var(--accent); }
     .chart-wrap {
       background: var(--surface-2); border: 1px solid var(--border);
       border-radius: 8px; padding: 14px; height: 260px; position: relative;
@@ -531,10 +544,12 @@
 
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
-let priceChart     = null;
-let searchTimer    = null;
-let filtersLoaded  = false;
-let marketSort     = { col: 'spread', order: 'desc' };
+let priceChart        = null;
+let searchTimer       = null;
+let filtersLoaded     = false;
+let marketSort        = { col: 'spread', order: 'desc' };
+let currentUuid       = null;
+let currentHistoryRange = 'all';
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const fmt     = n  => (n != null && n !== '') ? Number(n).toLocaleString()            : '—';
@@ -600,20 +615,20 @@ async function loadDashboard() {
     },
     {
       key: 'movers_up', title: 'Biggest Movers Up',
-      sub: 'Largest Buy Now price increase vs. first recorded price',
+      sub: 'Largest Buy Now price increase in the last 24 hours',
       metric: r => ({
         cls: 'm-pos',
         val: `+${fmt(r.price_change)}`,
-        sub: `+${Number(r.change_pct).toFixed(1)}% vs first recorded`,
+        sub: `+${Number(r.change_pct).toFixed(1)}% vs 24h ago`,
       }),
     },
     {
       key: 'movers_down', title: 'Biggest Movers Down',
-      sub: 'Largest Buy Now price decrease vs. first recorded price',
+      sub: 'Largest Buy Now price decrease in the last 24 hours',
       metric: r => ({
         cls: 'm-neg',
         val: `${fmt(r.price_change)}`,
-        sub: `${Number(r.change_pct).toFixed(1)}% vs first recorded`,
+        sub: `${Number(r.change_pct).toFixed(1)}% vs 24h ago`,
       }),
     },
   ];
@@ -716,12 +731,35 @@ async function loadCard(uuid, switchTab = false) {
     el.classList.toggle('active', el.dataset.uuid === uuid);
   });
 
+  currentUuid = uuid;
+  currentHistoryRange = 'all';
+
   const [card, history] = await Promise.all([
     fetch(`/api/card/${uuid}`).then(r => r.json()),
-    fetch(`/api/card/${uuid}/history`).then(r => r.json()),
+    fetch(`/api/card/${uuid}/history?timerange=all`).then(r => r.json()),
   ]);
 
   renderDetail(card, history);
+}
+
+async function switchHistoryRange(range) {
+  if (!currentUuid) return;
+  currentHistoryRange = range;
+
+  // Update active tab styling
+  document.querySelectorAll('.htab').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === range);
+  });
+
+  const history = await fetch(`/api/card/${currentUuid}/history?timerange=${range}`).then(r => r.json());
+
+  if (history.length >= 2) {
+    renderChart(history);
+  } else {
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
+    const wrap = document.querySelector('.chart-wrap');
+    if (wrap) wrap.innerHTML = `<div class="no-data" style="padding:40px 0">Not enough data for this range</div>`;
+  }
 }
 
 function renderDetail(card, history) {
@@ -801,7 +839,14 @@ function renderDetail(card, history) {
       ` : '<div class="no-data">No price data available</div>'}
 
       <div class="chart-section">
-        <div class="section-title">Price History</div>
+        <div class="chart-section-header">
+          <div class="section-title">Price History</div>
+          <div class="history-tabs">
+            <button class="htab active" data-range="all"  onclick="switchHistoryRange('all')">All Time</button>
+            <button class="htab"        data-range="7d"   onclick="switchHistoryRange('7d')">7 Days</button>
+            <button class="htab"        data-range="24h"  onclick="switchHistoryRange('24h')">24 Hours</button>
+          </div>
+        </div>
         ${history.length >= 2
           ? `<div class="chart-wrap"><canvas id="price-chart"></canvas></div>`
           : `<div class="no-data">${history.length === 0

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS price_history (
 CREATE INDEX IF NOT EXISTS idx_ph_uuid       ON price_history(uuid);
 CREATE INDEX IF NOT EXISTS idx_ph_fetched_at ON price_history(fetched_at);
 CREATE INDEX IF NOT EXISTS idx_ph_spread     ON price_history(spread DESC);
+CREATE INDEX IF NOT EXISTS idx_ph_uuid_time  ON price_history(uuid, fetched_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cards_rarity  ON cards(rarity);
 CREATE INDEX IF NOT EXISTS idx_cards_ovr     ON cards(ovr DESC);
 
@@ -260,16 +261,17 @@ def get_latest_prices_with_metadata() -> list[dict]:
     """Most-recent price snapshot per card, joined with card metadata."""
     with get_conn() as conn:
         rows = conn.execute("""
-            WITH latest AS (
-                SELECT uuid, best_sell_price, best_buy_price,
-                       ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at DESC) rn
+            WITH latest_times AS (
+                SELECT uuid, MAX(fetched_at) AS max_at
                 FROM price_history
+                GROUP BY uuid
             )
             SELECT c.rarity, c.ovr, c.display_position,
-                   l.best_sell_price, l.best_buy_price
-            FROM latest l
-            JOIN cards c ON c.uuid = l.uuid
-            WHERE l.rn = 1 AND l.best_sell_price > 0
+                   ph.best_sell_price, ph.best_buy_price
+            FROM price_history ph
+            JOIN latest_times lt ON ph.uuid = lt.uuid AND ph.fetched_at = lt.max_at
+            JOIN cards c ON c.uuid = ph.uuid
+            WHERE ph.best_sell_price > 0
         """).fetchall()
     return [dict(r) for r in rows]
 
