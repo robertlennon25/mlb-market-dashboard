@@ -59,6 +59,7 @@ def _scheduler_loop():
         except Exception as e:
             _logger.error("Scheduled fetch failed: %s", e, exc_info=True)
 
+    # Changed from every(5) to every(15) on 2026-03-22 to reduce Railway volume usage.
     _schedule.every(15).minutes.do(_job)
     while True:
         _schedule.run_pending()
@@ -534,64 +535,70 @@ def download_db():
     return FileResponse(_DB_PATH, filename="market_backup.db", media_type="application/octet-stream")
 
 
-@app.get("/admin/purge-history-dry-run")
-def purge_history_dry_run():
-    """Preview how many price_history rows would be deleted (keep every 3rd per card)."""
-    with get_conn() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-        to_delete = conn.execute(
-            "SELECT COUNT(*) FROM ("
-            "  SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
-            "  FROM price_history"
-            ") WHERE rn % 3 != 1"
-        ).fetchone()[0]
-    return {"total": total, "would_delete": to_delete, "would_keep": total - to_delete}
+# ---------------------------------------------------------------------------
+# Purge endpoints — uncomment to re-enable if history needs thinning again.
+# Last run: 2026-03-22. Deleted 2 of every 3 price_history rows per card
+# (kept every 3rd by fetched_at order) to reclaim Railway volume space.
+# ---------------------------------------------------------------------------
 
-
-_purge_state: dict = {"status": "idle", "message": ""}
-
-
-def _run_purge():
-    global _purge_state
-    try:
-        _purge_state = {"status": "running", "message": "Counting rows…"}
-        with get_conn() as conn:
-            before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-
-        _purge_state["message"] = f"Deleting rows (started with {before:,})…"
-        with get_conn() as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                "DELETE FROM price_history WHERE id IN ("
-                "  SELECT id FROM ("
-                "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
-                "    FROM price_history"
-                "  ) WHERE rn % 3 != 1"
-                ")"
-            )
-
-        _purge_state["message"] = "Checkpointing WAL…"
-        with get_conn() as conn:
-            conn.execute("PRAGMA wal_checkpoint(FULL)")
-            after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-
-        _purge_state = {"status": "done", "message": f"Deleted {before - after:,} rows. Remaining: {after:,}"}
-    except Exception as e:
-        _purge_state = {"status": "error", "message": str(e)}
-
-
-@app.get("/admin/purge-history-execute")
-def purge_history_execute():
-    """Kick off background purge — check /admin/purge-status for progress."""
-    if _purge_state.get("status") == "running":
-        return {"status": "already_running", "message": _purge_state["message"]}
-    threading.Thread(target=_run_purge, daemon=True).start()
-    return {"status": "started", "message": "Check /admin/purge-status for progress"}
-
-
-@app.get("/admin/purge-status")
-def purge_status():
-    return _purge_state
+# @app.get("/admin/purge-history-dry-run")
+# def purge_history_dry_run():
+#     """Preview how many price_history rows would be deleted (keep every 3rd per card)."""
+#     with get_conn() as conn:
+#         total = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+#         to_delete = conn.execute(
+#             "SELECT COUNT(*) FROM ("
+#             "  SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
+#             "  FROM price_history"
+#             ") WHERE rn % 3 != 1"
+#         ).fetchone()[0]
+#     return {"total": total, "would_delete": to_delete, "would_keep": total - to_delete}
+#
+#
+# _purge_state: dict = {"status": "idle", "message": ""}
+#
+#
+# def _run_purge():
+#     global _purge_state
+#     try:
+#         _purge_state = {"status": "running", "message": "Counting rows…"}
+#         with get_conn() as conn:
+#             before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+#
+#         _purge_state["message"] = f"Deleting rows (started with {before:,})…"
+#         with get_conn() as conn:
+#             conn.execute("PRAGMA journal_mode=WAL")
+#             conn.execute(
+#                 "DELETE FROM price_history WHERE id IN ("
+#                 "  SELECT id FROM ("
+#                 "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
+#                 "    FROM price_history"
+#                 "  ) WHERE rn % 3 != 1"
+#                 ")"
+#             )
+#
+#         _purge_state["message"] = "Checkpointing WAL…"
+#         with get_conn() as conn:
+#             conn.execute("PRAGMA wal_checkpoint(FULL)")
+#             after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+#
+#         _purge_state = {"status": "done", "message": f"Deleted {before - after:,} rows. Remaining: {after:,}"}
+#     except Exception as e:
+#         _purge_state = {"status": "error", "message": str(e)}
+#
+#
+# @app.get("/admin/purge-history-execute")
+# def purge_history_execute():
+#     """Kick off background purge — check /admin/purge-status for progress."""
+#     if _purge_state.get("status") == "running":
+#         return {"status": "already_running", "message": _purge_state["message"]}
+#     threading.Thread(target=_run_purge, daemon=True).start()
+#     return {"status": "started", "message": "Check /admin/purge-status for progress"}
+#
+#
+# @app.get("/admin/purge-status")
+# def purge_status():
+#     return _purge_state
 
 
 # ---------------------------------------------------------------------------

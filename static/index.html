@@ -561,7 +561,7 @@ const rBadge  = r  => r ? `badge-${r.toLowerCase()}` : '';
 
 function fmtTime(ts) {
   if (!ts) return '—';
-  const d = new Date(ts);
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
   return d.toLocaleDateString(undefined, {month:'short',day:'numeric'}) + ' ' +
          d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
@@ -863,7 +863,7 @@ function renderChart(history) {
   if (priceChart) { priceChart.destroy(); priceChart = null; }
 
   const labels = history.map(h => {
-    const d = new Date(h.fetched_at);
+    const d = new Date(h.fetched_at.replace(' ', 'T') + 'Z');
     return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' +
            d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   });
