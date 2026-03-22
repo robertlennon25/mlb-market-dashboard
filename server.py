@@ -548,23 +548,50 @@ def purge_history_dry_run():
     return {"total": total, "would_delete": to_delete, "would_keep": total - to_delete}
 
 
+_purge_state: dict = {"status": "idle", "message": ""}
+
+
+def _run_purge():
+    global _purge_state
+    try:
+        _purge_state = {"status": "running", "message": "Counting rows…"}
+        with get_conn() as conn:
+            before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+
+        _purge_state["message"] = f"Deleting rows (started with {before:,})…"
+        with get_conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "DELETE FROM price_history WHERE id IN ("
+                "  SELECT id FROM ("
+                "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
+                "    FROM price_history"
+                "  ) WHERE rn % 3 != 1"
+                ")"
+            )
+
+        _purge_state["message"] = "Checkpointing WAL…"
+        with get_conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+            after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+
+        _purge_state = {"status": "done", "message": f"Deleted {before - after:,} rows. Remaining: {after:,}"}
+    except Exception as e:
+        _purge_state = {"status": "error", "message": str(e)}
+
+
 @app.get("/admin/purge-history-execute")
 def purge_history_execute():
-    """Delete 2 out of every 3 price_history rows per card (evenly distributed)."""
-    with get_conn() as conn:
-        before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-        conn.execute(
-            "DELETE FROM price_history WHERE id IN ("
-            "  SELECT id FROM ("
-            "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
-            "    FROM price_history"
-            "  ) WHERE rn % 3 != 1"
-            ")"
-        )
-        conn.execute("PRAGMA wal_checkpoint(FULL)")
-        conn.execute("PRAGMA incremental_vacuum")
-        after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-    return {"deleted": before - after, "remaining": after}
+    """Kick off background purge — check /admin/purge-status for progress."""
+    if _purge_state.get("status") == "running":
+        return {"status": "already_running", "message": _purge_state["message"]}
+    threading.Thread(target=_run_purge, daemon=True).start()
+    return {"status": "started", "message": "Check /admin/purge-status for progress"}
+
+
+@app.get("/admin/purge-status")
+def purge_status():
+    return _purge_state
 
 
 # ---------------------------------------------------------------------------
