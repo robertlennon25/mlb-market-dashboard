@@ -59,7 +59,7 @@ def _scheduler_loop():
         except Exception as e:
             _logger.error("Scheduled fetch failed: %s", e, exc_info=True)
 
-    _schedule.every(5).minutes.do(_job)
+    _schedule.every(15).minutes.do(_job)
     while True:
         _schedule.run_pending()
         time.sleep(30)
@@ -532,6 +532,39 @@ def download_db():
     with get_conn() as conn:
         conn.execute("PRAGMA wal_checkpoint(FULL)")
     return FileResponse(_DB_PATH, filename="market_backup.db", media_type="application/octet-stream")
+
+
+@app.get("/admin/purge-history-dry-run")
+def purge_history_dry_run():
+    """Preview how many price_history rows would be deleted (keep every 3rd per card)."""
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+        to_delete = conn.execute(
+            "SELECT COUNT(*) FROM ("
+            "  SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
+            "  FROM price_history"
+            ") WHERE rn % 3 != 1"
+        ).fetchone()[0]
+    return {"total": total, "would_delete": to_delete, "would_keep": total - to_delete}
+
+
+@app.get("/admin/purge-history-execute")
+def purge_history_execute():
+    """Delete 2 out of every 3 price_history rows per card (evenly distributed)."""
+    with get_conn() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+        conn.execute(
+            "DELETE FROM price_history WHERE id IN ("
+            "  SELECT id FROM ("
+            "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
+            "    FROM price_history"
+            "  ) WHERE rn % 3 != 1"
+            ")"
+        )
+        conn.execute("PRAGMA wal_checkpoint(FULL)")
+        conn.execute("PRAGMA incremental_vacuum")
+        after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+    return {"deleted": before - after, "remaining": after}
 
 
 # ---------------------------------------------------------------------------
