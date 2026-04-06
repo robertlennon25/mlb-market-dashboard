@@ -23,6 +23,7 @@ A live market tracker for MLB The Show 26's Diamond Dynasty community market. Mo
 |---|---|
 | Market data polling | Live on Railway, every 15 min |
 | Price history | ~1M rows post-purge (7 days full resolution + twice-daily landmarks going back to 3/15) |
+| Dashboard loading | Pre-computed after every fetch, served instantly from memory |
 | Web UI | Deployed and serving at Railway URL |
 | DB | SQLite on Railway persistent volume |
 

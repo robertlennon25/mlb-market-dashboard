@@ -53,14 +53,15 @@ mlb26.theshow.com public API
                 ▼
             db.py / market.db (SQLite on Railway volume)
                 │
-                ├── compute_index.py  ← aggregates prices into market_index table
-                └── server.py         ← FastAPI serves everything to the frontend
+                ├── compute_index.py       ← aggregates prices into market_index table
+                ├── dashboard_snapshot.json ← pre-computed dashboard, overwritten every 15 min
+                └── server.py              ← FastAPI serves everything to the frontend
                         │
                         ▼
                 static/index.html     ← single-page app (vanilla JS + Chart.js)
 ```
 
-**Key timing note:** `fetch_listings.py` + `compute_index.py` run every **15 minutes** via the server's background scheduler (changed from 5 min on 2026-03-22 to reduce volume usage). `fetch_items.py` runs only once on first boot when the DB is empty.
+**Key timing note:** `fetch_listings.py` + `compute_index.py` run every **15 minutes** via the server's background scheduler (changed from 5 min on 2026-03-22 to reduce volume usage). After each run, the dashboard is pre-computed and written to `dashboard_snapshot.json` on the volume. `fetch_items.py` runs only once on first boot when the DB is empty.
 
 ---
 
@@ -75,6 +76,10 @@ mlb26.theshow.com public API
 - Path controlled by `DATABASE_PATH` env var (defaults to `data/db/market.db` locally)
 - `db.get_conn()` auto-creates the directory if missing
 - WAL mode enabled on every connection
+
+**Dashboard snapshot:** `/data/dashboard_snapshot.json` on the same volume
+- Pre-computed after every 15-min fetch, loaded into memory on startup
+- Derived from `DATABASE_PATH` — same directory, always co-located with the DB
 
 **Static frontend:** `static/index.html` — served by FastAPI's `StaticFiles` mount. This mount **must be last** in `server.py` or it shadows API routes.
 
@@ -139,7 +144,7 @@ Every API response row is passed through `_enrich()` in `server.py`, which adds 
 | `GET /admin/db-info` | DB path + row counts (debug) |
 | `GET /admin/download-db` | Download full SQLite file (WAL checkpointed first) |
 
-**Dashboard cache:** results cached for 300 seconds in `_dashboard_cache`. Invalidated by the background scheduler after each fetch. Call `_dashboard_cache["expires"] = 0.0` to force refresh.
+**Dashboard cache:** pre-computed eagerly after every 15-min fetch by `_save_dashboard_snapshot()` and persisted to `/data/dashboard_snapshot.json` on the volume. Loaded into `_dashboard_cache["data"]` on server startup so restarts don't cause a slow first load. `/api/dashboard` reads from memory only — no SQL on request. Falls back to on-demand computation only on first-ever boot before any fetch has completed.
 
 ---
 
@@ -161,8 +166,9 @@ Single HTML file, vanilla JS, Chart.js for charts. Four pages toggled by nav but
 ## Server Startup Behavior (`server.py` `lifespan`)
 
 1. `db.init_db()` — creates tables if missing
-2. If `card_count() == 0` → spawns background thread running `fetch_items.py` then `fetch_listings.py` then `compute_index.py`
-3. Always spawns background scheduler thread: every 15 min runs `fetch_listings.py` + `compute_index.py`
+2. `_load_dashboard_snapshot()` — loads `/data/dashboard_snapshot.json` into memory (instant dashboard on restart)
+3. If `card_count() == 0` → spawns background thread running `fetch_items.py` → `fetch_listings.py` → `compute_index.py` → `_save_dashboard_snapshot()`
+4. Always spawns background scheduler thread: every 15 min runs `fetch_listings.py` → `compute_index.py` → `_save_dashboard_snapshot()`
 
 Server returns 200 on health check immediately, even while initial data loads in the background. Frontend polls `/api/status` to show loading state.
 
