@@ -170,9 +170,44 @@ Server returns 200 on health check immediately, even while initial data loads in
 
 ## Volume Management
 
-`price_history` grows by ~1 row per card per 15-min fetch indefinitely. To thin history if volume fills up again, see the commented-out purge endpoints in `server.py` (search for `"Purge endpoints"`).
+`price_history` grows by ~1 row per card per 15-min fetch indefinitely. When the Railway volume is getting full, run a purge using the admin endpoints.
 
-**Purge strategy (as of 2026-04-05):** Delete all rows older than 7 days, except rows whose UTC time falls within ±7 min of **12:00 UTC (8am EDT)** or **00:00 UTC (8pm EDT)**. Those landmark rows are kept indefinitely for all-time price charts. Last 7 days are kept at full 15-min resolution. Last purge: **2026-04-05**.
+### Purge Strategy
+
+**Keep:** all data from the last 7 days (full 15-min resolution) + any older row whose UTC time falls within ±7 min of **12:00 UTC (8am EDT)** or **00:00 UTC (8pm EDT)**. Those twice-daily landmark rows are kept indefinitely for all-time price charts.
+
+**Delete:** everything older than 7 days that doesn't land in a landmark window.
+
+### How to Run a Purge
+
+1. **Download a backup first** — visit `YOUR_RAILWAY_URL/admin/download-db` in the browser. Rename the file immediately to `market_backup_<date>.db` so it doesn't overwrite a previous backup.
+2. **Verify the backup locally:**
+   ```bash
+   sqlite3 ~/Desktop/market_backup_<date>.db "SELECT MIN(fetched_at), MAX(fetched_at) FROM price_history;"
+   sqlite3 ~/Desktop/market_backup_<date>.db "SELECT COUNT(*) FROM price_history;"
+   ```
+3. **Uncomment the purge endpoints** in `server.py` — the block starts with `_KEEP_WINDOW_SQL` and ends with `def purge_status()`. Remove the leading `# ` from every code line (leave the header comment block as-is).
+4. **Push to Railway:**
+   ```bash
+   git add server.py
+   git commit -m "re-enable purge endpoints for <date> history thinning"
+   git push
+   ```
+5. **Dry run** — visit `YOUR_RAILWAY_URL/admin/purge-history-dry-run`. Confirm `landmark_rows_kept` is non-zero and `would_delete` looks right (~2/3 of rows older than 7 days).
+6. **Execute** — visit `YOUR_RAILWAY_URL/admin/purge-history-execute`, then poll `YOUR_RAILWAY_URL/admin/purge-status` every 30s until `"status": "done"`.
+7. **Re-comment the endpoints**, update the purge log below, and push:
+   ```bash
+   git add server.py CLAUDE.md
+   git commit -m "comment out purge endpoints post-<date> purge"
+   git push
+   ```
+
+### Purge Log
+
+| Date | Rows Before | Rows After | Deleted | Strategy |
+|---|---|---|---|---|
+| 2026-03-22 | ~5,400,000 | ~1,800,000 | ~3,600,000 | Keep every 3rd row per card (5-min → ~15-min density) |
+| 2026-04-05 | ~3,024,000 | ~1,071,000 | ~1,953,000 | Keep last 7 days + 8am/8pm EDT landmarks for older data |
 
 ---
 
