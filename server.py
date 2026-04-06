@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Optional
 
+import json
 import threading
 import subprocess
 import logging
@@ -30,14 +31,15 @@ except ImportError:
 
 import db as _db
 from db import get_conn
-from config.settings import quicksell_value, flip_profit, flip_profit_pct
+from config.settings import quicksell_value, flip_profit, flip_profit_pct, DB_PATH as _DB_PATH
 
 # Track background fetch state so /api/status can report progress
 _fetch_state = {"status": "idle", "message": ""}
 
-# Simple TTL cache for the dashboard (refreshed every 5 min by the scheduler anyway)
-_dashboard_cache: dict = {"data": None, "expires": 0.0}
-_DASHBOARD_TTL = 300  # seconds
+# Dashboard snapshot: computed eagerly after every fetch, persisted to disk.
+# Loaded from disk on startup so restarts don't cause a slow first load.
+_dashboard_cache: dict = {"data": None}
+_DASHBOARD_SNAPSHOT_PATH = os.path.join(os.path.dirname(_DB_PATH), "dashboard_snapshot.json")
 
 
 _logger = logging.getLogger("server")
@@ -54,7 +56,7 @@ def _scheduler_loop():
         try:
             subprocess.run([sys.executable, "scripts/fetch_listings.py"], check=True)
             subprocess.run([sys.executable, "scripts/compute_index.py"], check=True)
-            _dashboard_cache["expires"] = 0.0  # invalidate so next request recomputes
+            _save_dashboard_snapshot()
             _logger.info("Scheduled fetch complete.")
         except Exception as e:
             _logger.error("Scheduled fetch failed: %s", e, exc_info=True)
@@ -79,6 +81,7 @@ def _background_fetch():
         # Build the initial market index from the fresh data
         subprocess.run([sys.executable, "scripts/compute_index.py"], check=True)
 
+        _save_dashboard_snapshot()
         _fetch_state = {"status": "done", "message": "Initial data load complete."}
     except Exception as e:
         _fetch_state = {"status": "error", "message": str(e)}
@@ -87,6 +90,7 @@ def _background_fetch():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _db.init_db()
+    _load_dashboard_snapshot()  # warm the cache from disk before serving any requests
     # On first deploy the DB will be empty — kick off a background fetch so the
     # server starts immediately (health check passes) while data loads in parallel.
     if _db.card_count() == 0:
@@ -431,35 +435,22 @@ _MOVERS_CTE = """
 """
 
 
-@app.get("/api/dashboard")
-def dashboard(limit: int = Query(8, le=20)):
-    """
-    Returns four ranked card lists for the landing page:
-      top_flip_profit — highest absolute flip profit (stubs) after 10% tax
-      top_flip_pct    — highest % return on bid after 10% tax
-      movers_up       — biggest Buy Now price increase over last 24 hours
-      movers_down     — biggest Buy Now price decrease over last 24 hours
-    """
-    now = time.monotonic()
-    if _dashboard_cache["data"] is not None and now < _dashboard_cache["expires"]:
-        return _dashboard_cache["data"]
-
+def _compute_dashboard(limit: int = 20) -> dict:
+    """Run the four dashboard queries and return enriched results.
+    Always computed at limit=20 so the snapshot covers any requested slice."""
     with get_conn() as conn:
         top_flip_profit = conn.execute(
             _FLIP_CTE + " ORDER BY flip_profit DESC LIMIT ?", (limit,)
         ).fetchall()
-
         top_flip_pct = conn.execute(
             _FLIP_CTE + " ORDER BY flip_profit_pct DESC LIMIT ?", (limit,)
         ).fetchall()
-
         movers_up = conn.execute(
             _MOVERS_CTE +
             " AND l.best_sell_price > r.ref_price"
             " ORDER BY price_change DESC LIMIT ?",
             (limit,),
         ).fetchall()
-
         movers_down = conn.execute(
             _MOVERS_CTE +
             " AND l.best_sell_price < r.ref_price"
@@ -470,15 +461,62 @@ def dashboard(limit: int = Query(8, le=20)):
     def enrich(rows):
         return [_enrich(dict(r)) for r in rows]
 
-    result = {
+    return {
         "top_flip_profit": enrich(top_flip_profit),
         "top_flip_pct":    enrich(top_flip_pct),
         "movers_up":       enrich(movers_up),
         "movers_down":     enrich(movers_down),
     }
-    _dashboard_cache["data"]    = result
-    _dashboard_cache["expires"] = time.monotonic() + _DASHBOARD_TTL
-    return result
+
+
+def _save_dashboard_snapshot():
+    """Compute dashboard and write to disk. Called after every scheduled fetch."""
+    try:
+        data = _compute_dashboard()
+        os.makedirs(os.path.dirname(_DASHBOARD_SNAPSHOT_PATH), exist_ok=True)
+        with open(_DASHBOARD_SNAPSHOT_PATH, "w") as f:
+            json.dump(data, f)
+        _dashboard_cache["data"] = data
+        _logger.info("Dashboard snapshot saved to %s", _DASHBOARD_SNAPSHOT_PATH)
+    except Exception as e:
+        _logger.error("Failed to save dashboard snapshot: %s", e, exc_info=True)
+
+
+def _load_dashboard_snapshot():
+    """Load the persisted dashboard snapshot into memory on startup."""
+    try:
+        if os.path.exists(_DASHBOARD_SNAPSHOT_PATH):
+            with open(_DASHBOARD_SNAPSHOT_PATH) as f:
+                _dashboard_cache["data"] = json.load(f)
+            _logger.info("Dashboard snapshot loaded from %s", _DASHBOARD_SNAPSHOT_PATH)
+    except Exception as e:
+        _logger.warning("Could not load dashboard snapshot: %s", e)
+
+
+@app.get("/api/dashboard")
+def dashboard(limit: int = Query(8, le=20)):
+    """
+    Returns four ranked card lists for the landing page:
+      top_flip_profit — highest absolute flip profit (stubs) after 10% tax
+      top_flip_pct    — highest % return on bid after 10% tax
+      movers_up       — biggest Buy Now price increase over last 24 hours
+      movers_down     — biggest Buy Now price decrease over last 24 hours
+
+    Results are pre-computed after every 15-min fetch and served from memory.
+    Falls back to on-demand computation only on first-ever boot before any fetch.
+    """
+    data = _dashboard_cache["data"]
+    if data is None:
+        # First boot before any fetch has completed — compute on the fly once.
+        data = _compute_dashboard()
+        _dashboard_cache["data"] = data
+
+    return {
+        "top_flip_profit": data["top_flip_profit"][:limit],
+        "top_flip_pct":    data["top_flip_pct"][:limit],
+        "movers_up":       data["movers_up"][:limit],
+        "movers_down":     data["movers_down"][:limit],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -512,8 +550,6 @@ def index_history(
 # ---------------------------------------------------------------------------
 # Temporary DB download — remove after use
 # ---------------------------------------------------------------------------
-
-from config.settings import DB_PATH as _DB_PATH
 
 @app.get("/admin/db-info")
 def db_info():
