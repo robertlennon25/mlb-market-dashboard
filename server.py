@@ -537,68 +537,88 @@ def download_db():
 
 # ---------------------------------------------------------------------------
 # Purge endpoints — uncomment to re-enable if history needs thinning again.
-# Last run: 2026-03-22. Deleted 2 of every 3 price_history rows per card
-# (kept every 3rd by fetched_at order) to reclaim Railway volume space.
+# Last run: 2026-04-05. Strategy: delete price_history rows older than 7 days,
+# except rows whose UTC time falls within ±7 min of noon (12:00 UTC = 8am EDT)
+# or midnight (00:00 UTC = 8pm EDT). Those landmark rows are kept for all-time
+# price charts. Last 7 days are kept at full 15-min resolution.
 # ---------------------------------------------------------------------------
 
-# @app.get("/admin/purge-history-dry-run")
-# def purge_history_dry_run():
-#     """Preview how many price_history rows would be deleted (keep every 3rd per card)."""
-#     with get_conn() as conn:
-#         total = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-#         to_delete = conn.execute(
-#             "SELECT COUNT(*) FROM ("
-#             "  SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
-#             "  FROM price_history"
-#             ") WHERE rn % 3 != 1"
-#         ).fetchone()[0]
-#     return {"total": total, "would_delete": to_delete, "would_keep": total - to_delete}
-#
-#
-# _purge_state: dict = {"status": "idle", "message": ""}
-#
-#
-# def _run_purge():
-#     global _purge_state
-#     try:
-#         _purge_state = {"status": "running", "message": "Counting rows…"}
-#         with get_conn() as conn:
-#             before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-#
-#         _purge_state["message"] = f"Deleting rows (started with {before:,})…"
-#         with get_conn() as conn:
-#             conn.execute("PRAGMA journal_mode=WAL")
-#             conn.execute(
-#                 "DELETE FROM price_history WHERE id IN ("
-#                 "  SELECT id FROM ("
-#                 "    SELECT id, ROW_NUMBER() OVER (PARTITION BY uuid ORDER BY fetched_at ASC) AS rn"
-#                 "    FROM price_history"
-#                 "  ) WHERE rn % 3 != 1"
-#                 ")"
-#             )
-#
-#         _purge_state["message"] = "Checkpointing WAL…"
-#         with get_conn() as conn:
-#             conn.execute("PRAGMA wal_checkpoint(FULL)")
-#             after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
-#
-#         _purge_state = {"status": "done", "message": f"Deleted {before - after:,} rows. Remaining: {after:,}"}
-#     except Exception as e:
-#         _purge_state = {"status": "error", "message": str(e)}
-#
-#
-# @app.get("/admin/purge-history-execute")
-# def purge_history_execute():
-#     """Kick off background purge — check /admin/purge-status for progress."""
-#     if _purge_state.get("status") == "running":
-#         return {"status": "already_running", "message": _purge_state["message"]}
-#     threading.Thread(target=_run_purge, daemon=True).start()
-#     return {"status": "started", "message": "Check /admin/purge-status for progress"}
-#
-#
-# @app.get("/admin/purge-status")
-# def purge_status():
-#     return _purge_state
+# Landmark time windows (UTC) for all-time chart anchors:
+#   8:00 AM EDT = 12:00 UTC  →  keep rows where time(fetched_at) is 11:53–12:07
+#   8:00 PM EDT = 00:00 UTC  →  keep rows where time(fetched_at) is 23:53–23:59 or 00:00–00:07
+
+_KEEP_WINDOW_SQL = (
+    "("
+    "  time(fetched_at) BETWEEN '11:53:00' AND '12:07:00'"   # 8am EDT ± 7min
+    "  OR time(fetched_at) >= '23:53:00'"                    # 8pm EDT ± 7min (late side)
+    "  OR time(fetched_at) <= '00:07:00'"                    # 8pm EDT ± 7min (early side)
+    ")"
+)
+
+@app.get("/admin/purge-history-dry-run")
+def purge_history_dry_run():
+    """Preview how many rows would be deleted.
+    Keeps: all data ≤7 days old + landmark rows (±7min of 8am/8pm EDT) for older data."""
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+        old_total = conn.execute(
+            "SELECT COUNT(*) FROM price_history WHERE fetched_at < datetime('now', '-7 days')"
+        ).fetchone()[0]
+        old_landmarks = conn.execute(
+            "SELECT COUNT(*) FROM price_history WHERE fetched_at < datetime('now', '-7 days') AND "
+            + _KEEP_WINDOW_SQL
+        ).fetchone()[0]
+        to_delete = old_total - old_landmarks
+    return {
+        "total": total,
+        "older_than_7d": old_total,
+        "landmark_rows_kept": old_landmarks,
+        "would_delete": to_delete,
+        "would_keep": total - to_delete,
+    }
+
+
+_purge_state: dict = {"status": "idle", "message": ""}
+
+
+def _run_purge():
+    global _purge_state
+    try:
+        _purge_state = {"status": "running", "message": "Counting rows…"}
+        with get_conn() as conn:
+            before = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+
+        _purge_state["message"] = f"Deleting rows (started with {before:,})…"
+        with get_conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "DELETE FROM price_history"
+                " WHERE fetched_at < datetime('now', '-7 days')"
+                " AND NOT " + _KEEP_WINDOW_SQL
+            )
+
+        _purge_state["message"] = "Checkpointing WAL…"
+        with get_conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+            after = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+
+        _purge_state = {"status": "done", "message": f"Deleted {before - after:,} rows. Remaining: {after:,}"}
+    except Exception as e:
+        _purge_state = {"status": "error", "message": str(e)}
+
+
+@app.get("/admin/purge-history-execute")
+def purge_history_execute():
+    """Kick off background purge — check /admin/purge-status for progress."""
+    if _purge_state.get("status") == "running":
+        return {"status": "already_running", "message": _purge_state["message"]}
+    threading.Thread(target=_run_purge, daemon=True).start()
+    return {"status": "started", "message": "Check /admin/purge-status for progress"}
+
+
+@app.get("/admin/purge-status")
+def purge_status():
+    return _purge_state
 
 
 # ---------------------------------------------------------------------------
